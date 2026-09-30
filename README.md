@@ -1,9 +1,36 @@
-# RISC-V Pipeline Teaching
+# RISC-V 五级流水线教学模拟器
 
-React 19 and TypeScript project skeleton. Business features are not implemented.
+React 19 + TypeScript 实现的 RV32I 子集五级流水线(IF/ID/EX/MEM/WB)可视化教学网页。
 
-Node.js 22.19.0; dependencies are pinned in package.json and package-lock.json.
+## 运行
 
-- `npm run dev` starts Vite.
-- `npm run build` checks types and builds the production bundle.
-- `npm test` runs tests added to this project.
+- `npm run dev` 启动开发服务器(默认 http://localhost:5173)。
+- `npm run build` 类型检查并构建生产包。
+- `npm test` 运行 vitest 自测(汇编器与流水线共 12 例)。
+
+## 操作说明
+
+1. 在左侧编辑汇编源码,或点击示例按钮载入「依赖链」「加载-使用停顿」「分支循环」「JAL 跳转」示例。
+2. 点击「汇编并装载」;语法错误(非法操作数、重复/缺失标签等)会标注源码行号。修改源码后必须重新装载。
+3. 「单周期」逐周期推进;「运行」自动连续推进(不阻塞页面);「暂停」中断;「重置」恢复初始状态。
+4. 右侧周期时间表展示每条动态指令(同一源码行按 L行号#次数 区分)在各周期所处流水级;事件说明区逐条解释前递、停顿与冲刷。
+
+## 支持的指令子集
+
+`ADD SUB ADDI LW SW BEQ JAL`,寄存器 x0–x31(x0 恒零),指令从地址 0 起每条 4 字节,跳转目标为标签。支持 `#` 与 `//` 注释、空行、行首标签。
+
+## 模拟器特性
+
+- 单发射五级流水线,各级每周期同时推进;寄存器同周期先写后读。
+- 指令/数据存储分离;数据内存 4096 字节、小端、初始为零;越界或非四字节对齐访存立即报错并暂停。
+- EX 操作数支持 EX/MEM 与 MEM/WB 前递(较新结果优先),不前递未就绪的加载值。
+- 紧随 LW 且读取其非零目标寄存器的指令停顿一周期(冻结 PC 与 IF/ID,向 EX 插入气泡);SW 写入值同样在 EX 取数并处理依赖。
+- BEQ/JAL 在 EX 决定去向,默认顺序取指;跳转冲刷年轻指令并取消其写寄存器/内存副作用;取指到末尾后停止取指,排空流水线才判定完成。
+
+## 代码结构
+
+- `src/sim/assembler.ts` 汇编器(标签、注释、错误定位)
+- `src/sim/cpu.ts` 流水线内核(前递、停顿、冲刷、内存)
+- `src/sim/examples.ts` 示例程序
+- `src/sim/sim.test.ts` 自测
+- `src/components/` 界面组件(编辑器、控制、流水线、寄存器、内存、时间表、事件说明)
