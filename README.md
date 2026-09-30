@@ -1,9 +1,65 @@
-# RISC-V Pipeline Teaching
+# RISC-V 五级流水线教学模拟器
 
-React 19 and TypeScript project skeleton. Business features are not implemented.
+基于 React 19 + TypeScript 5.8 + Vite 的 RV32I 单发射五级流水线可视化教学网页。
 
-Node.js 22.19.0; dependencies are pinned in package.json and package-lock.json.
+## 启动
 
-- `npm run dev` starts Vite.
-- `npm run build` checks types and builds the production bundle.
-- `npm test` runs tests added to this project.
+```bash
+npm install
+npm run dev      # 开发服务器（默认 http://localhost:5173，监听 0.0.0.0）
+npm test         # vitest 自测（汇编 + 流水线行为，8 项）
+npm run build    # 类型检查 + 生产构建
+npm run preview  # 预览生产构建
+```
+
+## 操作说明
+
+1. 在左侧「汇编源码」编辑程序，`#` 后为注释，支持空行与行内标签（`loop:`）。
+2. 修改源码后顶部出现「已修改，请重新装载」提示，点击 **重新装载** 后才会按新源码执行；汇编错误会精确定位到源码行。
+3. **单周期**：推进一个时钟周期；**运行**：以约 3.3 拍/秒自动推进（`setTimeout` 协作调度，不阻塞页面）；**暂停** 停止自动运行；**重置** 恢复寄存器、内存与流水线初态。
+4. 顶部下拉可载入内置示例：分支循环求和、数据依赖链（前递 + LW 停顿）、32 位回绕与 x0。
+5. 右侧展示：周期时间表（IF/ID/EX/MEM/WB，斜纹格为被冲刷的气泡）、寄存器 x0–x31（有符号值与十六进制）、小端数据内存；左下展示流水线寄存器内容与每周期的前递/停顿/冲刷解释。
+6. 同一源码行在循环中被多次取指时，周期表按「指令的取指次序」分成多行（源码行列标注 `L行号`），不会混在一起。
+
+## 指令子集（RV32I）
+
+| 指令 | 语义 |
+| --- | --- |
+| `ADD rd, rs1, rs2` / `SUB rd, rs1, rs2` | 寄存器加减，32 位回绕 |
+| `ADDI rd, rs1, imm` | 加 12 位立即数 [-2048, 2047] |
+| `LW rd, imm(rs1)` / `SW rs2, imm(rs1)` | 4 字节对齐访存，小端 |
+| `BEQ rs1, rs2, label` | 相等分支（EX 阶段判定） |
+| `JAL rd, label` | 跳转并把返回地址写入 rd |
+
+指令从地址 `0x0` 起每条 4 字节；寄存器为 `x0`–`x31`，`x0` 恒为零（写入被忽略）；数据内存独立于指令存储，共 4096 字节、初值为零；地址越界或非 4 字节对齐时当拍暂停并报出源码行。
+
+## 流水线与冒险控制模型
+
+- 每周期 IF、ID、EX、MEM、WB 同时推进一拍；WB 在周期内先写寄存器，ID/EX 当拍即可读到新值（同周期先写后读）。
+- **EX 前递**：EX 阶段读取操作数时按 `EX/MEM → MEM/WB → 寄存器堆` 优先级选择；EX/MEM 中尚未完成 MEM 的 `LW` 结果不前递；`SW` 的写入值同样在 EX 取数并参与前递。
+- **LW 停顿**：紧随 `LW` 且读取其非零目标寄存器的指令在 ID 被识别，冻结 PC 与 IF/ID、向 ID/EX 插入一个气泡，停顿一周期后再以前递/写回取得数据。
+- **控制冒险**：默认顺序取指；`BEQ`/`JAL` 在 EX 决定去向，跳转时把 IF/ID 中指令和本拍顺序取到的指令作为气泡冲刷（其写寄存器与写内存副作用均取消），下一拍从目标地址取指。
+- **末尾处理**：PC 越过最后一条指令后停止取指（`draining`），流水线排空后才标记完成；在途分支仍可把 PC 重定向回程序内部（无限循环需自行用 BEQ 退出）。
+
+## 代码组织
+
+```
+src/
+  assembler/        # 汇编层
+    types.ts        #   指令/程序/错误类型
+    assembler.ts    #   词法解析、标签解析、操作数校验
+  pipeline/         # 流水线层
+    types.ts        #   CPU 状态、流水寄存器、周期日志类型
+    hazard.ts       #   冒险控制：寄存器读写判定、前递选择、LW 停顿检测
+    cpu.ts          #   五级流水线单周期推进（WB→MEM→EX→ID→IF）
+    cpu.test.ts     #   vitest 自测
+  ui/               # 界面层
+    useCpu.ts       #   装载/单步/运行/暂停/重置状态管理（非阻塞定时）
+    Editor.tsx      #   源码编辑器（行号、错误行高亮）
+    PipelineView.tsx#   流水级与流水寄存器
+    Timeline.tsx    #   周期时间表（循环多次取指分行）
+    RegMemView.tsx  #   寄存器与小端内存
+    EventLog.tsx    #   前递/停顿/冲刷解释
+  examples.ts       # 依赖链、分支循环、回绕示例
+  App.tsx / styles.css
+```
